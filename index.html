@@ -55,7 +55,7 @@
 
     .filters {
       display: grid;
-      grid-template-columns: repeat(9, 1fr);
+      grid-template-columns: 1.1fr repeat(8, 1fr) 1.15fr;
       gap: 10px;
       padding: 10px 20px;
       background: #fff;
@@ -65,7 +65,8 @@
 
     .filters select,
     .filters input,
-    .filters button {
+    .filters button,
+    .filters label {
       padding: 10px;
       border-radius: 8px;
       border: 1px solid #cbd5e1;
@@ -75,9 +76,14 @@
       font: inherit;
     }
 
-    .filters button {
+    .filters button,
+    .filters label {
       cursor: pointer;
       font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
     }
 
     .btn-primary {
@@ -89,6 +95,12 @@
     .btn-secondary {
       background: #fff !important;
       color: #0f172a !important;
+    }
+
+    .upload-btn {
+      border-color: #0b3d91 !important;
+      color: #0b3d91 !important;
+      background: #eff6ff !important;
     }
 
     .map-wrap {
@@ -110,7 +122,8 @@
       border-radius: 10px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       z-index: 500;
-      min-width: 190px;
+      min-width: 240px;
+      max-width: 320px;
     }
 
     .legend-title {
@@ -125,7 +138,8 @@
       color: #475569;
       margin-bottom: 6px;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
+      line-height: 1.45;
     }
 
     .legend-item:last-child { margin-bottom: 0; }
@@ -136,6 +150,7 @@
       border-radius: 50%;
       display: inline-block;
       margin-right: 6px;
+      margin-top: 4px;
       flex: 0 0 10px;
     }
 
@@ -247,8 +262,31 @@
       color: #1d4ed8;
     }
 
-    @media (max-width: 1200px) {
-      .filters { grid-template-columns: repeat(5, 1fr); }
+    .marker-drop {
+      opacity: 0;
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: markerDropIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      will-change: transform, opacity;
+    }
+
+    @keyframes markerDropIn {
+      0% {
+        opacity: 0;
+        transform: translateY(-38px) scale(0.25);
+      }
+      70% {
+        opacity: 1;
+        transform: translateY(4px) scale(1.08);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @media (max-width: 1400px) {
+      .filters { grid-template-columns: repeat(6, 1fr); }
       #map { height: calc(100vh - 166px); }
     }
 
@@ -260,7 +298,7 @@
       }
       .header-meta { text-align: left; }
       .filters { grid-template-columns: repeat(2, 1fr); }
-      #map { height: calc(100vh - 322px); }
+      #map { height: calc(100vh - 430px); }
       .project-drawer { width: 100%; left: -100%; }
     }
   </style>
@@ -293,6 +331,8 @@
     </select>
     <button id="fitZoomBtn" class="btn-primary" type="button">Fit Zoom</button>
     <button id="clearFiltersBtn" class="btn-secondary" type="button">Clear Filters</button>
+    <label for="excelUpload" class="upload-btn">Upload Excel</label>
+    <input id="excelUpload" type="file" accept=".xlsx,.xls" style="display:none;" />
   </div>
 
   <div id="projectDrawer" class="project-drawer">
@@ -309,7 +349,7 @@
   <div class="map-wrap">
     <div id="map"></div>
     <div class="legend" id="legendBox">
-      <div class="legend-title" id="legendTitle">Margin Legend</div>
+      <div class="legend-title" id="legendTitle">Ready</div>
       <div id="legendContent"></div>
     </div>
   </div>
@@ -320,6 +360,7 @@
 
   <script>
     let rawData = [];
+    let eventsBound = false;
 
     const state = {
       division: 'ALL',
@@ -334,6 +375,14 @@
 
     function byId(id) {
       return document.getElementById(id);
+    }
+
+    function setLegendMessage(title, lines) {
+      const legendTitle = byId('legendTitle');
+      const legendContent = byId('legendContent');
+      if (!legendTitle || !legendContent) return;
+      legendTitle.textContent = title;
+      legendContent.innerHTML = lines.map(line => `<div class="legend-item">${line}</div>`).join('');
     }
 
     function normalizeProject(row) {
@@ -508,7 +557,7 @@
       const data = filteredData();
       const maxRevenue = data.length ? Math.max(...data.map(d => d.r)) : 0;
 
-      data.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)).forEach(p => {
+      data.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)).forEach((p, index) => {
         const s = status(p.m);
         const fill = state.mode === 'margin' ? colorByStatus(s) : colorByRevenue(p.r, maxRevenue);
         const marker = L.circleMarker([p.lat, p.lng], {
@@ -516,7 +565,8 @@
           fillColor: fill,
           color: '#fff',
           weight: 1.5,
-          fillOpacity: 0.9
+          fillOpacity: 0.9,
+          className: 'map-point'
         });
 
         marker.bindPopup(
@@ -531,6 +581,19 @@
           `Revenue: ${formatCurrency(p.r)}`
         );
         cluster.addLayer(marker);
+
+        const applyMarkerAnimation = () => {
+          const path = marker._path;
+          if (!path) return;
+          path.classList.remove('marker-drop');
+          void path.getBoundingClientRect();
+          path.style.animationDelay = `${Math.min(index * 35, 700)}ms`;
+          path.classList.add('marker-drop');
+        };
+
+        marker.on('add', () => {
+          requestAnimationFrame(applyMarkerAnimation);
+        });
       });
 
       renderLegend(data);
@@ -553,6 +616,8 @@
     }
 
     function bindEvents() {
+      if (eventsBound) return;
+      eventsBound = true;
       byId('division')?.addEventListener('change', e => { state.division = e.target.value; render(); });
       byId('region')?.addEventListener('change', e => { state.region = e.target.value; render(); });
       byId('client')?.addEventListener('change', e => { state.client = e.target.value; render(); });
@@ -565,30 +630,72 @@
       byId('clearFiltersBtn')?.addEventListener('click', clearFilters);
       byId('toggleProjectsBtn')?.addEventListener('click', () => byId('projectDrawer')?.classList.add('open'));
       byId('closeDrawerBtn')?.addEventListener('click', () => byId('projectDrawer')?.classList.remove('open'));
+      byId('excelUpload')?.addEventListener('change', async e => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await loadExcelFromFile(file);
+        e.target.value = '';
+      });
+    }
+
+    async function parseWorkbook(workbook) {
+      const sheet = workbook.Sheets['Projects_Data'];
+      if (!sheet) throw new Error('Sheet Projects_Data not found');
+      const rows = XLSX.utils.sheet_to_json(sheet);
+      rawData = rows.map(normalizeProject).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      populateSlicers();
+      render();
+      setLegendMessage('Data Loaded', [
+        `<span class="dot" style="background:#16a34a"></span>${rawData.length} project(s) loaded successfully.`
+      ]);
+      renderLegend(filteredData());
     }
 
     async function loadExcelData() {
+      const isLocalFile = window.location.protocol === 'file:';
+      if (isLocalFile) {
+        setLegendMessage('Upload Required', [
+          'This page is opened locally, so automatic Excel fetch is blocked by the browser.',
+          'Use <strong>Upload Excel</strong> to load your workbook manually.',
+          'The workbook must contain a sheet named <strong>Projects_Data</strong>.'
+        ]);
+        return;
+      }
+
       try {
         const response = await fetch('data.xlsx', { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          setLegendMessage('Excel Not Found', [
+            'Could not find <strong>data.xlsx</strong> next to this HTML file.',
+            'Place both files in the same folder, or use <strong>Upload Excel</strong>.',
+            'The workbook must contain a sheet named <strong>Projects_Data</strong>.'
+          ]);
+          return;
+        }
 
         const arrayBuffer = await response.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const sheet = workbook.Sheets['Projects_Data'];
-        if (!sheet) throw new Error('Sheet Projects_Data not found');
+        await parseWorkbook(workbook);
+      } catch {
+        setLegendMessage('Upload Required', [
+          'Automatic Excel loading is not available in this environment.',
+          'Use <strong>Upload Excel</strong> to open your workbook manually.',
+          'The workbook must contain a sheet named <strong>Projects_Data</strong>.'
+        ]);
+      }
+    }
 
-        const rows = XLSX.utils.sheet_to_json(sheet);
-        rawData = rows.map(normalizeProject).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-
-        populateSlicers();
-        bindEvents();
-        render();
-      } catch (error) {
-        console.error('Excel load failed', error);
-        const legendTitle = byId('legendTitle');
-        const legendContent = byId('legendContent');
-        if (legendTitle) legendTitle.textContent = 'Excel Load Error';
-        if (legendContent) legendContent.innerHTML = `<div class="legend-item">Could not load <strong>data.xlsx</strong>. Make sure it is in the same folder and sheet name is <b>Projects_Data</b>.</div>`;
+    async function loadExcelFromFile(file) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        await parseWorkbook(workbook);
+      } catch {
+        setLegendMessage('Upload Error', [
+          'The selected file could not be parsed.',
+          'Check that the workbook contains <strong>Projects_Data</strong>.',
+          'Also confirm the column headers match the template.'
+        ]);
       }
     }
 
@@ -599,7 +706,8 @@
         { name: 'drawer exists', pass: Boolean(byId('projectDrawer')) && Boolean(byId('drawerList')) },
         { name: 'drawer controls exist', pass: Boolean(byId('toggleProjectsBtn')) && Boolean(byId('closeDrawerBtn')) },
         { name: 'all slicers exist', pass: ['division', 'region', 'client', 'year', 'search', 'drawerSearch', 'mode', 'mapStyle'].every(id => Boolean(byId(id))) },
-        { name: 'action buttons exist', pass: Boolean(byId('fitZoomBtn')) && Boolean(byId('clearFiltersBtn')) }
+        { name: 'action buttons exist', pass: Boolean(byId('fitZoomBtn')) && Boolean(byId('clearFiltersBtn')) },
+        { name: 'upload control exists', pass: Boolean(byId('excelUpload')) }
       ];
       const failed = tests.filter(t => !t.pass);
       console.log(failed.length ? failed : 'All dashboard tests passed');
@@ -610,7 +718,12 @@
       dateEl.innerText = new Date().toLocaleString();
     }
 
+    bindEvents();
     runTests();
+    setLegendMessage('Ready', [
+      'The dashboard will try to load <strong>data.xlsx</strong> automatically.',
+      'If not available, use <strong>Upload Excel</strong>.'
+    ]);
     loadExcelData();
   </script>
 </body>
